@@ -3,6 +3,10 @@
 use core::arch::asm;
 
 const SBI_CONSOLE_PUTCHAR: usize = 1;
+#[allow(dead_code)]
+const SBI_SHUTDOWN: usize = 0x53525354;
+#[allow(dead_code)]
+const SBI_SET_TIMER: usize = 0x54494D45;
 
 /// general sbi call
 #[inline(always)]
