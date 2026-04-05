@@ -218,50 +218,87 @@ pub fn increase_current_syscall_count(syscall_id: usize) {
 }
 
 /// Map a new page for the current 'Running' task.
-pub fn mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    // check if address is aligned to page size
-    if _start % crate::config::PAGE_SIZE != 0 || _port & !0x7 != 0 || _port & 0x7 == 0 {
+pub fn mmap(start: usize, len: usize, prot: usize) -> isize {
+    if start % crate::config::PAGE_SIZE != 0 || (prot & !0x7) != 0 || (prot & 0x7) == 0 {
         return -1;
     }
+
+    let end = match start.checked_add(len) {
+        Some(v) => v,
+        None => return -1,
+    };
 
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current = inner.current_task;
     let task = &mut inner.tasks[current];
-
     let memory_set = &mut task.memory_set;
-    let start_va = crate::mm::VirtAddr(_start);
-    let end_va = crate::mm::VirtAddr(_start + _len);
 
+    let start_va = crate::mm::VirtAddr(start);
+    let end_va = crate::mm::VirtAddr(end);
+    let start_vpn = start_va.floor();
+    let end_vpn = end_va.ceil();
 
-
-
-    let mut permission = crate::mm::MapPermission::U;
-
-    if (_port & 0x1) != 0 {
-        permission |= crate::mm::MapPermission::R;
+    for vpn_idx in start_vpn.0..end_vpn.0 {
+        let vpn = crate::mm::VirtPageNum(vpn_idx);
+        if let Some(pte) = memory_set.translate(vpn) {
+            if pte.is_valid() {
+                return -1;
+            }
+        }
     }
-    if (_port & 0x2) != 0 {
-        permission |= crate::mm::MapPermission::W;
+
+    if start_vpn.0 == end_vpn.0 {
+        return 0;
     }
-    if (_port & 0x4) != 0 {
-        permission |= crate::mm::MapPermission::X;
+
+    let mut perm = crate::mm::MapPermission::U;
+    if (prot & 0x1) != 0 {
+        perm |= crate::mm::MapPermission::R;
     }
-    
-    memory_set.insert_framed_area(start_va, end_va, permission);
-    0 
+    if (prot & 0x2) != 0 {
+        perm |= crate::mm::MapPermission::W;
+    }
+    if (prot & 0x4) != 0 {
+        perm |= crate::mm::MapPermission::X;
+    }
+
+    memory_set.insert_framed_area(start_va, end_va, perm);
+    0
 }
 
 /// Unmap a page for the current 'Running' task.
-pub fn munmap(_start: usize, _len: usize) -> isize {
-    if _start % crate::config::PAGE_SIZE != 0 || _len % crate::config::PAGE_SIZE != 0 {
+pub fn munmap(start: usize, len: usize) -> isize {
+    if start % crate::config::PAGE_SIZE != 0 {
         return -1;
     }
+
+    let end = match start.checked_add(len) {
+        Some(v) => v,
+        None => return -1,
+    };
+
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current = inner.current_task;
-    let _task = &mut inner.tasks[current];
+    let task = &mut inner.tasks[current];
+    let memory_set = &mut task.memory_set;
 
-    let _start_va = crate::mm::VirtAddr(_start);
-    let _end_va = crate::mm::VirtAddr(_start + _len);
+    let start_va = crate::mm::VirtAddr(start);
+    let end_va = crate::mm::VirtAddr(end);
+    let start_vpn = start_va.floor();
+    let end_vpn = end_va.ceil();
 
+    for vpn_idx in start_vpn.0..end_vpn.0 {
+        let vpn = crate::mm::VirtPageNum(vpn_idx);
+        match memory_set.translate(vpn) {
+            Some(pte) if pte.is_valid() => {}
+            _ => return -1,
+        }
+    }
+
+    if start_vpn.0 == end_vpn.0 {
+        return 0;
+    }
+
+    memory_set.unmap_vpn_range(start_va, end_va);
     0
 }

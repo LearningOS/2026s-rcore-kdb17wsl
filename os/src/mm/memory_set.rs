@@ -40,6 +40,24 @@ pub struct MemorySet {
 }
 
 impl MemorySet {
+    /// unmap the page containing [start, start + len)
+    pub fn unmap_vpn_range(&mut self, start_va: VirtAddr, end_va: VirtAddr) {
+        let start_vpn = start_va.floor();
+        let end_vpn = end_va.ceil();
+
+        for vpn_idx in start_vpn.0..end_vpn.0 {
+            let vpn = VirtPageNum(vpn_idx);
+
+            if let Some(area) = self
+                .areas
+                .iter_mut()
+                .rev()
+                .find(|a| a.vpn_range.get_start() <= vpn && vpn < a.vpn_range.get_end())
+            {
+                area.unmap_one(&mut self.page_table, vpn);
+            }
+        }
+    }
     /// Create a new empty `MemorySet`.
     pub fn new_bare() -> Self {
         Self {
