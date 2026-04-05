@@ -202,3 +202,66 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
 }
+
+/// Get the current 'Running' task's syscall count of a syscall.
+pub fn get_current_syscall_count(syscall_id: usize) -> usize {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    inner.tasks[current].syscall_count[syscall_id]
+}
+
+/// Increase the current 'Running' task's syscall count of a syscall by 1.
+pub fn increase_current_syscall_count(syscall_id: usize) {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    inner.tasks[current].syscall_count[syscall_id] += 1;
+}
+
+/// Map a new page for the current 'Running' task.
+pub fn mmap(_start: usize, _len: usize, _port: usize) -> isize {
+    // check if address is aligned to page size
+    if _start % crate::config::PAGE_SIZE != 0 || _port & !0x7 != 0 || _port & 0x7 == 0 {
+        return -1;
+    }
+
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    let task = &mut inner.tasks[current];
+
+    let memory_set = &mut task.memory_set;
+    let start_va = crate::mm::VirtAddr(_start);
+    let end_va = crate::mm::VirtAddr(_start + _len);
+
+
+
+
+    let mut permission = crate::mm::MapPermission::U;
+
+    if (_port & 0x1) != 0 {
+        permission |= crate::mm::MapPermission::R;
+    }
+    if (_port & 0x2) != 0 {
+        permission |= crate::mm::MapPermission::W;
+    }
+    if (_port & 0x4) != 0 {
+        permission |= crate::mm::MapPermission::X;
+    }
+    
+    memory_set.insert_framed_area(start_va, end_va, permission);
+    0 
+}
+
+/// Unmap a page for the current 'Running' task.
+pub fn munmap(_start: usize, _len: usize) -> isize {
+    if _start % crate::config::PAGE_SIZE != 0 || _len % crate::config::PAGE_SIZE != 0 {
+        return -1;
+    }
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    let _task = &mut inner.tasks[current];
+
+    let _start_va = crate::mm::VirtAddr(_start);
+    let _end_va = crate::mm::VirtAddr(_start + _len);
+
+    0
+}
