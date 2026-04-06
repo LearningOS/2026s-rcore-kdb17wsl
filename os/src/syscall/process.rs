@@ -162,8 +162,10 @@ pub fn sys_spawn(_path: *const u8) -> isize {
     let path = translated_str(token, _path);
     if let Some(data) = get_app_data_by_name(path.as_str()) {
         let task = current_task().unwrap();
-        task.spawn(data);
-        0
+        let new_task = task.spawn(data);
+        let new_pid = new_task.getpid();
+        add_task(new_task);
+        new_pid as isize
     } else {
         -1
     }
