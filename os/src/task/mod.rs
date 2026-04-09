@@ -120,3 +120,88 @@ lazy_static! {
 pub fn add_initproc() {
     add_task(INITPROC.clone());
 }
+
+
+/// Map a new page for the current 'Running' task.
+pub fn mmap(start: usize, len: usize, prot: usize) -> isize {
+    if start % crate::config::PAGE_SIZE != 0 || (prot & !0x7) != 0 || (prot & 0x7) == 0 {
+        return -1;
+    }
+
+    let end = match start.checked_add(len) {
+        Some(v) => v,
+        None => return -1,
+    };
+
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    let memory_set = &mut task_inner.memory_set;
+
+    let start_va = crate::mm::VirtAddr(start);
+    let end_va = crate::mm::VirtAddr(end);
+    let start_vpn = start_va.floor();
+    let end_vpn = end_va.ceil();
+
+    for vpn_idx in start_vpn.0..end_vpn.0 {
+        let vpn = crate::mm::VirtPageNum(vpn_idx);
+        if let Some(pte) = memory_set.translate(vpn) {
+            if pte.is_valid() {
+                return -1;
+            }
+        }
+    }
+
+    if start_vpn.0 == end_vpn.0 {
+        return 0;
+    }
+
+    let mut perm = crate::mm::MapPermission::U;
+    if (prot & 0x1) != 0 {
+        perm |= crate::mm::MapPermission::R;
+    }
+    if (prot & 0x2) != 0 {
+        perm |= crate::mm::MapPermission::W;
+    }
+    if (prot & 0x4) != 0 {
+        perm |= crate::mm::MapPermission::X;
+    }
+
+    memory_set.insert_framed_area(start_va, end_va, perm);
+    0
+}
+
+/// Unmap a page for the current 'Running' task.
+pub fn munmap(start: usize, len: usize) -> isize {
+    if start % crate::config::PAGE_SIZE != 0 {
+        return -1;
+    }
+
+    let end = match start.checked_add(len) {
+        Some(v) => v,
+        None => return -1,
+    };
+
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    let memory_set = &mut task_inner.memory_set;
+
+    let start_va = crate::mm::VirtAddr(start);
+    let end_va = crate::mm::VirtAddr(end);
+    let start_vpn = start_va.floor();
+    let end_vpn = end_va.ceil();
+
+    for vpn_idx in start_vpn.0..end_vpn.0 {
+        let vpn = crate::mm::VirtPageNum(vpn_idx);
+        match memory_set.translate(vpn) {
+            Some(pte) if pte.is_valid() => {}
+            _ => return -1,
+        }
+    }
+
+    if start_vpn.0 == end_vpn.0 {
+        return 0;
+    }
+
+    memory_set.unmap_vpn_range(start_va, end_va);
+    0
+}
