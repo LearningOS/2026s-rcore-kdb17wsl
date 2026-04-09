@@ -162,6 +162,15 @@ impl TaskControlBlock {
     pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
         let mut parent_inner = self.inner_exclusive_access();
 
+        let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
+        for fd in parent_inner.fd_table.iter() {
+            if let Some(file) = fd {
+                new_fd_table.push(Some(file.clone()));
+            } else {
+                new_fd_table.push(None);
+            }
+        }
+
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
@@ -185,7 +194,7 @@ impl TaskControlBlock {
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
                     exit_code: 0,
-                    fd_table: Vec::new(),
+                    fd_table: new_fd_table,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
                     priority: 16,

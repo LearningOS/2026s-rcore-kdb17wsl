@@ -56,6 +56,7 @@ impl OSInode {
 }
 
 lazy_static! {
+    /// The root inode of the file system
     pub static ref ROOT_INODE: Arc<Inode> = {
         let efs = EasyFileSystem::open(BLOCK_DEVICE.clone());
         Arc::new(EasyFileSystem::root_inode(&efs))
@@ -155,5 +156,25 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn stat(&self) -> super::Stat {
+        let inner = self.inner.exclusive_access();
+        let inode = inner.inode.clone();
+
+        let mode = inode.read_disk_inode(|disk_inode| {
+            if disk_inode.is_dir() {
+                super::StatMode::DIR
+            } else {
+                super::StatMode::FILE
+            }
+        });
+
+        super::Stat {
+            dev: 0,
+            ino: inode.id() as u64,
+            mode: mode,
+            nlink: ROOT_INODE.count_links(inode.id() as u32) as u32,
+            pad: [0; 7],
+        }
     }
 }
