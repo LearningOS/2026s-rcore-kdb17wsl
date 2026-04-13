@@ -65,6 +65,64 @@ impl ProcessControlBlockInner {
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
+    /// detect if there is a mutex deadlock
+    pub fn detect_mutex_deadlock(&self) -> bool {
+        let allocation = &self.mutex_allocation;
+        let need = &self.mutex_need;
+        let m = self.mutex_list.len();
+        let n = allocation.len();
+        if n == 0 || m == 0 {
+            return false;
+        }
+
+        let mut work = self.mutex_available.clone();
+        let mut finish = vec![false; n];
+        
+        let mut is_deadlock = true;
+
+        while is_deadlock {
+            is_deadlock = false;
+            for i in 0..n {
+                if !finish[i] && need[i].iter().zip(&work).all(|(n, w)| *n <= *w) {
+                    for j in 0..m {
+                        work[j] += allocation[i][j];
+                    }
+                    finish[i] = true;
+                    is_deadlock = true;
+                }
+            }
+        }
+        is_deadlock && finish.iter().any(|&f| !f)
+    }
+    /// detect if there is a semaphore deadlock
+    pub fn detect_sem_deadlock(&self) -> bool {
+        let allocation = &self.sem_allocation;
+        let need = &self.sem_need;
+        let m = self.semaphore_list.len();
+        let n = allocation.len();
+        if n == 0 || m == 0 {
+            return false;
+        }
+
+        let mut work = self.sem_available.clone();
+        let mut finish = vec![false; n];
+        
+        let mut is_deadlock = true;
+
+        while is_deadlock {
+            is_deadlock = false;
+            for i in 0..n {
+                if !finish[i] && need[i].iter().zip(&work).all(|(n, w)| *n <= *w) {
+                    for j in 0..m {
+                        work[j] += allocation[i][j];
+                    }
+                    finish[i] = true;
+                    is_deadlock = true;
+                }
+            }
+        }
+        is_deadlock && finish.iter().any(|&f| !f)
+    }
     /// allocate a new file descriptor
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
@@ -89,6 +147,103 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+
+    pub fn check_size(&mut self, tid: usize, resource_id: usize, resource_type: usize) {
+        let n = tid + 1;
+        let m = resource_id + 1;
+        if resource_type == 0 {
+            while self.mutex_allocation.len() < n {
+                self.mutex_allocation.push(vec![0; self.mutex_list.len()]);
+            }
+            while self.mutex_need.len() < n {
+                self.mutex_need.push(vec![0; self.mutex_list.len()]);
+            }
+            for row in self.mutex_allocation.iter_mut() {
+                while row.len() < m {
+                    row.push(0);
+                }
+            }
+            for row in self.mutex_need.iter_mut() {
+                while row.len() < m {
+                    row.push(0);
+                }
+            }
+        } else if resource_type == 1 {
+            while self.sem_allocation.len() < n {
+                self.sem_allocation.push(vec![0; self.semaphore_list.len()]);
+            }
+            while self.sem_need.len() < n {
+                self.sem_need.push(vec![0; self.semaphore_list.len()]);
+            }
+            for row in self.sem_allocation.iter_mut() {
+                while row.len() < m {
+                    row.push(0);
+                }
+            }
+            for row in self.sem_need.iter_mut() {
+                while row.len() < m {
+                    row.push(0);
+                }
+            }
+        }
+    }
+
+    /// type 0 is mutex, type 1 is semaphore
+    pub fn detect_deadlock(&self, resource_type: usize) -> bool {
+        match resource_type {
+            0 => {
+                let allocation = &self.mutex_allocation;
+                let need = &self.mutex_need;
+                let m = self.mutex_list.len();
+                let n = allocation.len();
+                if n == 0 || m == 0 {
+                    return false;
+                }
+                let mut work = self.mutex_available.clone();
+                let mut finish = vec![false; n];
+                let mut progress = true;
+                while progress {
+                    progress = false;
+                    for i in 0..n {
+                        if !finish[i] && need[i].iter().zip(&work).all(|(n, w)| *n <= *w) {
+                            for j in 0..m {
+                                work[j] += allocation[i][j];
+                            }
+                            finish[i] = true;
+                            progress = true;
+                        }
+                    }
+                }
+                finish.iter().any(|&f| !f)
+            }
+            1 => {
+                let allocation = &self.sem_allocation;
+                let need = &self.sem_need;
+                let m = self.semaphore_list.len();
+                let n = allocation.len();
+                if n == 0 || m == 0 {
+                    return false;
+                }
+                let mut work = self.sem_available.clone();
+                let mut finish = vec![false; n];
+                let mut progress = true;
+                while progress {
+                    progress = false;
+                    for i in 0..n {
+                        if !finish[i] && need[i].iter().zip(&work).all(|(n, w)| *n <= *w) {
+                            for j in 0..m {
+                                work[j] += allocation[i][j];
+                            }
+                            finish[i] = true;
+                            progress = true;
+                        }
+                    }
+                }
+                finish.iter().any(|&f| !f)
+            }
+            _ => false,
+        }
     }
 }
 
